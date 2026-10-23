@@ -15,7 +15,7 @@ First read `Agent.md`, `AGENTS.md`, README and every `docs/*.md`, particularly `
 
 **Build verification policy (correction to earlier versions of this prompt):** Android compilation, lint, Android unit tests and APK/AAB generation are delegated to GitHub Actions (`android-ci.yml` for feature branches/PRs, `android-build.yml` for `main-android` releases). Do **not** stop or spend time installing an Android SDK, Android Studio, Gradle or JDK locally. Run the non-Android checks listed in `Agent.md`, and report Android checks as "Not locally verified — pending GitHub Actions". Never claim uncompiled code is build-verified, and never weaken CI checks.
 
-**Status:** Task 1 CI/icon fixes and the Task 2 vertical slice (Room schema v1, profiles, hospitals, medical records, medicine library, profile medicines, Compose navigation) and the pure Task 3.1/3.2 domain contracts are implemented on `feature/1-basic-setup`; confirm them in GitHub Actions before continuing.
+**Status:** Task 1 CI/icon fixes and the Task 2 vertical slice (Room schema v1 → v2 with prescription-time snapshots, profiles, hospitals, medical records, medicine library, profile medicines, Compose navigation) and the pure Task 3.1/3.2 domain contracts are implemented on `feature/1-basic-setup`; confirm them in GitHub Actions before continuing.
 
 **Task 1 — Verify the scaffold, don't jump ahead:**
 1. Compare the starter against existing care-chime repo, preserve the user's own commits and branch conventions, and migrate/import scaffold carefully. Do not overwrite existing work.

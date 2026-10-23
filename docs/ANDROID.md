@@ -16,6 +16,7 @@ This file is the **authoritative Android build guide** and must be updated with 
 | `.github/workflows/android-build.yml` | `main-android` only: validate, test, build, sign, publish, commit artifacts |
 | `scripts/bump-android-version.py` | Safe code increment; optionally update name |
 | `scripts/check-source-policy.py` | SDK-free static checks: privacy policy, package/imports, delimiters |
+| `scripts/check-room-schemas.py` | Every database version 1..`CareChimeDatabase.VERSION` has a valid committed schema JSON |
 | `scripts/sign-release.sh` | Sign and verify APK and AAB |
 | `scripts/generate-keystore.mjs` | Generate PKCS12 signing material locally |
 | `scripts/detect-keystore-format.mjs` | Inspect keystore with `keytool` |
@@ -38,7 +39,9 @@ The starter SDK values follow the current LocalTell reference: min SDK 26, compi
 | Compose BOM | 2026.09.00 | Material 3 + `material-icons-core` |
 | Robolectric | 4.17 | JVM Room tests; SDK pinned to 35 in `app/src/test/resources/robolectric.properties` |
 
-Room exports its schema to `app/schemas/<database class>/<version>.json` (`ksp { arg("room.schemaLocation", …) }`). Commit each new schema file. Never edit a committed schema: bump `CareChimeDatabase.VERSION`, add an explicit `Migration` to `CareChimeMigrations.ALL` and a migration test. Destructive fallback migration is forbidden (enforced by `check-source-policy.py`).
+Room exports its schema to `app/schemas/<database class>/<version>.json` (`ksp { arg("room.schemaLocation", …) }`). Commit each new schema file. Never edit a committed schema: bump `CareChimeDatabase.VERSION`, add an explicit, additive `Migration` to `CareChimeMigrations.ALL` and a migration test built from the previous committed schema. Destructive fallback migration is forbidden (enforced by `check-source-policy.py`). Missing, uncommitted or modified schema files fail both workflows (`check-room-schemas.py` plus a git check after the build).
+
+Schema bootstrap for a new version: push the version bump to a feature branch; `android-ci.yml` fails (schema not committed) but always uploads the `room-schemas` artifact. Download it, commit only the new `<version>.json` (never edit older files) and push again.
 
 ## Build verification policy
 
@@ -48,6 +51,7 @@ Coding agents may implement features without a local Android SDK. **Android comp
 python3 scripts/validate-config.py
 python3 -m unittest discover -s scripts/tests -v
 python3 scripts/check-source-policy.py
+python3 scripts/check-room-schemas.py   # fails until every schema version is committed
 ```
 
 Report Android checks that could not run locally as "Not locally verified — pending GitHub Actions". Never weaken workflow checks to obtain a green run.
@@ -80,8 +84,8 @@ Runs on every push to a branch other than `main-android`, on pull requests (incl
 2. Validate config, run script tests and `check-source-policy.py`.
 3. `gradle lint testDebugUnitTest` (domain tests + Robolectric Room tests).
 4. `gradle assembleDebug assembleRelease bundleRelease`.
-5. Fail if a committed Room schema changed; warn if a new schema file was generated but not committed.
-6. Upload the Room schemas, the **debug APK** (debug-signed, for device testing only — not a release) and lint/test reports.
+5. Fail if a committed Room schema changed, if a generated schema file is not committed, or if any version 1..`CareChimeDatabase.VERSION` lacks a valid committed schema (`check-room-schemas.py`).
+6. Upload the Room schemas (always, even on failure), the **debug APK** (debug-signed, for device testing only — not a release) and lint/test reports.
 
 ## Android SDK installation in CI
 
@@ -92,7 +96,7 @@ Runs on every push to a branch other than `main-android`, on pull requests (incl
 The workflow runs on pushes to `main-android` or manual dispatch **from that branch**.
 
 1. Check out `main-android`, prepare JDK 21, Android SDK (Android CLI, as above), Gradle 9.5.0.
-2. Run config checks, script unit tests, `check-source-policy.py`, Android lint and unit tests.
+2. Run config checks, script unit tests, `check-source-policy.py`, Android lint and unit tests, then fail if the exported Room schemas differ from the committed ones or any version is missing (before any version bump).
 3. Increment `versionCode` **for the planned build** (leave `versionName` unchanged).
 4. Build the new version of both release APK and AAB.
 5. Replace older APK/AAB artifacts in `releases/` (retain latest files only (Git history still grows)).
@@ -167,6 +171,6 @@ The launcher uses an **adaptive icon** (`res/mipmap-anydpi-v26/ic_launcher.xml` 
 
 - No medication reminder scheduling, alarms or notifications exist yet; the reminder rules are pure domain code with unit tests only.
 - Workflows and Kotlin code introduced on `feature/1-basic-setup` were written without a local Android SDK; their compile/lint/test status is established only by the GitHub Actions `android-ci.yml` run.
-- The first Room schema JSON (`app/schemas/.../1.json`) is generated by CI and must be downloaded from the `room-schemas` artifact and committed.
+- Room schema JSON is generated by CI and must be committed from the `room-schemas` artifact: `1.json` from the run on commit `78d13f7` (schema v1) and `2.json` from a run on the schema v2 commit. Until both are committed, the migration test and the schema check fail by design.
 - A monochrome (themed) launcher icon layer is not provided yet.
 - Generated branding assets are conceptual and should be approved for public branding before release.

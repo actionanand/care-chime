@@ -12,10 +12,15 @@ data class Age(
     val days: Int,
     val approximate: Boolean,
 ) {
+    /**
+     * Children under [DETAILED_UNTIL_YEARS] show years and months (e.g. "2 years 3 months"); infants
+     * show months, or days in their first month. An approximate age only knows whole years, so it is
+     * never given invented months.
+     */
     fun describe(): String {
         val text = when {
-            years >= 2 -> plural(years, "year")
-            years == 1 -> if (months == 0) "1 year" else "1 year ${plural(months, "month")}"
+            years >= DETAILED_UNTIL_YEARS -> plural(years, "year")
+            years >= 1 -> if (months == 0) plural(years, "year") else "${plural(years, "year")} ${plural(months, "month")}"
             months >= 1 -> plural(months, "month")
             else -> plural(days, "day")
         }
@@ -23,6 +28,10 @@ data class Age(
     }
 
     private fun plural(value: Int, unit: String) = if (value == 1) "1 $unit" else "$value ${unit}s"
+
+    companion object {
+        const val DETAILED_UNTIL_YEARS = 5
+    }
 }
 
 object AgeCalculator {

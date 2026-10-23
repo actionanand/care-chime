@@ -46,6 +46,7 @@ import com.actionanand.carechime.app.ui.components.EmptyState
 import com.actionanand.carechime.app.ui.components.LoadingBox
 import com.actionanand.carechime.app.ui.components.PickerField
 import com.actionanand.carechime.app.ui.components.TextInput
+import com.actionanand.carechime.app.ui.components.describe
 import com.actionanand.carechime.app.ui.components.formatDate
 
 private const val REFERENCE_DISCLAIMER =
@@ -141,6 +142,12 @@ fun MedicineEditScreen(
         deleteMessage = "Medicines still used by a profile cannot be deleted.",
     ) {
         Text(REFERENCE_DISCLAIMER, style = MaterialTheme.typography.bodySmall)
+        if (viewModel.isEditing) {
+            Text(
+                "Changes apply to medicines added from now on. Existing profile medicine records keep the details recorded when they were added.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
         TextInput(
             value = input.name,
             onValueChange = { v -> viewModel.update { it.copy(name = v) } },
@@ -250,13 +257,17 @@ fun ProfileMedicinesScreen(
                 }
                 items(list, key = { it.course.id }) { entry ->
                     val course = entry.course
+                    val prescribed = course.prescribedMedicine
                     Card(Modifier.fillMaxWidth().clickable(onClickLabel = "Edit") { onEditCourse(viewModel.profileId, course.id) }) {
                         Column(Modifier.padding(16.dp)) {
                             Text(
-                                entry.medicine?.displayName() ?: "Medicine no longer in library",
+                                prescribed?.displayName() ?: entry.medicine?.displayName() ?: "Medicine no longer in library",
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.SemiBold,
                             )
+                            (prescribed?.detailLine() ?: entry.medicine?.detailLine())?.let {
+                                Text(it, style = MaterialTheme.typography.bodyMedium)
+                            }
                             Text(
                                 listOfNotNull(
                                     "${course.doseAmount} ${course.doseUnit}",
@@ -274,10 +285,18 @@ fun ProfileMedicinesScreen(
                                 listOfNotNull(
                                     course.status.label,
                                     course.prescribedBy?.let { "Dr: $it" },
-                                    course.hospitalId?.let { hospitalNames[it] },
+                                    course.recordedHospital?.describe(stillLinked = course.hospitalId != null)
+                                        ?: course.hospitalId?.let { hospitalNames[it] },
                                 ).joinToString(" · "),
                                 style = MaterialTheme.typography.bodySmall,
                             )
+                            val libraryEntry = entry.medicine
+                            if (prescribed != null && libraryEntry != null && prescribed.differsFrom(libraryEntry)) {
+                                Text(
+                                    "The library entry has changed since this was recorded; details above are as prescribed.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                            }
                         }
                     }
                 }
@@ -324,6 +343,14 @@ fun ProfileMedicineEditScreen(
             noneLabel = if (catalog.isEmpty()) "Library is empty" else "Choose a medicine",
             error = viewModel.error(ProfileMedicineValidator.MEDICINE),
         )
+        viewModel.recordedMedicine?.let { (recordedId, recorded) ->
+            if (recordedId == input.medicineId) {
+                Text(
+                    "Recorded with this prescription: ${recorded.displayName()} · ${recorded.detailLine()}",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        }
         OutlinedButton(onClick = onCreateMedicine, modifier = Modifier.fillMaxWidth()) {
             Text("Add a new medicine to the library")
         }

@@ -11,17 +11,18 @@
 
 ## Phase 1 — Family records (implemented; pending CI verification)
 - [x] Room database (schema v1), explicit migration list and profile CRUD
-- [x] DOB/approximate age, optional relationship and blood group
+- [x] Schema v2: prescription-time medicine and hospital snapshots (additive migration 1→2 + tests)
+- [x] DOB/approximate age (years and months under five), optional relationship and blood group
 - [x] Multiple hospitals per profile; hospital IDs, doctor, map links
 - [x] Conditions, allergies, medicine allergies and medical history
 - [x] Generic medicine library, profile medicines
-- [ ] Commit generated `app/schemas` v1 JSON from the CI artifact
+- [ ] Commit `app/schemas` 1.json (CI artifact from run on `78d13f7`) and 2.json (artifact from the v2 commit); CI fails until both are committed
 
 ## Phase 2 — Reminder reliability
 - [x] Pure recurrence and interval engine with tests (domain only)
 - [x] Fixed, rolling, PRN, one-time and meal-time schedule rules (domain only)
 - [x] Idempotent dose event ledger with actual vs recorded time (domain only)
-- [ ] Persist schedules, occurrences and dose events (Room v2 + migration tests)
+- [ ] Persist schedules, occurrences and dose events (next Room schema version + migration tests)
 - [ ] AlarmManager/receivers/channels and permissions
 - [ ] Actual-dose UI, snooze, skip, stop/pause actions
 - [ ] Boot/timezone/permission/restore recovery tests

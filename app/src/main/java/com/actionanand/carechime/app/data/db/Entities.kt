@@ -6,7 +6,7 @@ import androidx.room.Index
 import androidx.room.PrimaryKey
 
 /*
- * Schema v1. Conventions (part of the future portable export contract):
+ * Schema v2 (v1 + additive snapshot columns). Conventions (part of the future portable export contract):
  * - Primary keys are random UUID strings, never autoincrement integers.
  * - Calendar dates are ISO-8601 text (yyyy-MM-dd); instants are epoch milliseconds (UTC).
  * - Enums are stored by constant name.
@@ -129,6 +129,9 @@ data class HistoryEntity(
     val notes: String?,
     val createdAt: Long,
     val updatedAt: Long,
+    // v2: hospital details captured when linked; kept after the hospital record is edited or deleted.
+    val hospitalName: String? = null,
+    val hospitalPlaceName: String? = null,
 )
 
 @Entity(tableName = "medicines")
@@ -187,4 +190,14 @@ data class ProfileMedicineEntity(
     val status: String,
     val createdAt: Long,
     val updatedAt: Long,
+    // v2: library details captured at prescription time; later library edits never change them.
+    val medicineName: String? = null,
+    val medicineBrandName: String? = null,
+    val medicineGenericNames: String? = null,
+    val medicineForm: String? = null,
+    val medicineStrength: String? = null,
+    val medicineConcentration: String? = null,
+    val medicineManufacturer: String? = null,
+    val hospitalName: String? = null,
+    val hospitalPlaceName: String? = null,
 )

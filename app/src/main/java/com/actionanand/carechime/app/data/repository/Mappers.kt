@@ -21,8 +21,10 @@ import com.actionanand.carechime.app.domain.model.MedicalHistoryEntry
 import com.actionanand.carechime.app.domain.model.Medicine
 import com.actionanand.carechime.app.domain.model.MedicineForm
 import com.actionanand.carechime.app.domain.model.MedicineRoute
+import com.actionanand.carechime.app.domain.model.PrescribedMedicine
 import com.actionanand.carechime.app.domain.model.Profile
 import com.actionanand.carechime.app.domain.model.ProfileMedicine
+import com.actionanand.carechime.app.domain.model.RecordedHospital
 import java.time.Instant
 import java.time.LocalDate
 
@@ -96,7 +98,11 @@ internal fun HistoryEntity.toDomain() = MedicalHistoryEntry(
     notes = notes,
     createdAt = createdAt.toInstant(),
     updatedAt = updatedAt.toInstant(),
+    recordedHospital = recordedHospitalOf(hospitalName, hospitalPlaceName),
 )
+
+internal fun recordedHospitalOf(name: String?, placeName: String?): RecordedHospital? =
+    name?.let { RecordedHospital(it, placeName) }
 
 internal fun MedicineEntity.toDomain() = Medicine(
     id = id,
@@ -130,4 +136,16 @@ internal fun ProfileMedicineEntity.toDomain() = ProfileMedicine(
     status = enumOr(status, CourseStatus.PAUSED),
     createdAt = createdAt.toInstant(),
     updatedAt = updatedAt.toInstant(),
+    prescribedMedicine = medicineName?.let {
+        PrescribedMedicine(
+            name = it,
+            brandName = medicineBrandName,
+            genericNames = medicineGenericNames,
+            form = enumOr(medicineForm, MedicineForm.OTHER),
+            strength = medicineStrength,
+            concentration = medicineConcentration,
+            manufacturer = medicineManufacturer,
+        )
+    },
+    recordedHospital = recordedHospitalOf(hospitalName, hospitalPlaceName),
 )

@@ -2,6 +2,10 @@ package com.actionanand.carechime.app.domain
 
 import com.actionanand.carechime.app.domain.model.CourseStatus
 import com.actionanand.carechime.app.domain.schedule.CourseWindow
+import com.actionanand.carechime.app.domain.schedule.DoseActionResult
+import com.actionanand.carechime.app.domain.schedule.DoseLedger
+import com.actionanand.carechime.app.domain.schedule.DoseOccurrence
+import com.actionanand.carechime.app.domain.schedule.DoseOccurrenceStatus
 import com.actionanand.carechime.app.domain.schedule.DueBasis
 import com.actionanand.carechime.app.domain.schedule.Meal
 import com.actionanand.carechime.app.domain.schedule.MealRelation
@@ -19,6 +23,7 @@ import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.ZoneId
+import java.time.ZoneOffset
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -142,6 +147,103 @@ class ScheduleCalculatorTest {
         assertEquals(NoReminderReason.COURSE_ENDED, none(result).reason)
     }
 
+    @Test fun rollingEndDateIsInclusiveToTheMinute() {
+        val lastDay = LocalDate.of(2026, 10, 23)
+        val afternoon = calculatorAt(at(ist, 2026, 10, 23, 13, 0))
+        val lastMinute = due(afternoon.next(schedule(rolling(12), end = lastDay), at(ist, 2026, 10, 23, 11, 59)))
+        assertEquals(at(ist, 2026, 10, 23, 23, 59), lastMinute.dueAt)
+        assertEquals(
+            NoReminderReason.COURSE_ENDED,
+            none(afternoon.next(schedule(rolling(12), end = lastDay), at(ist, 2026, 10, 23, 12, 0))).reason,
+        )
+    }
+
+    @Test fun rollingOverdueDoseIsNotRemindedOnceTheCourseHasEnded() {
+        val dayAfterEnd = calculatorAt(at(ist, 2026, 10, 24, 8, 0))
+        val result = dayAfterEnd.next(schedule(rolling(6), end = LocalDate.of(2026, 10, 23)), at(ist, 2026, 10, 23, 7, 0))
+        assertEquals(NoReminderReason.COURSE_ENDED, none(result).reason)
+    }
+
+    @Test fun rollingFirstDoseOutsideTreatmentWindowIsRejected() {
+        val startsLater = schedule(rolling(6), start = LocalDate.of(2026, 10, 24))
+        assertEquals(NoReminderReason.OUTSIDE_COURSE_WINDOW, none(calculator.next(startsLater, null)).reason)
+        val endedBefore = schedule(rolling(6), end = LocalDate.of(2026, 10, 22))
+        assertEquals(NoReminderReason.OUTSIDE_COURSE_WINDOW, none(calculator.next(endedBefore, null)).reason)
+    }
+
+    @Test fun rollingIgnoresAdministrationsBeforeTheCourseStart() {
+        val course = schedule(rolling(6), start = LocalDate.of(2026, 10, 23))
+        val result = due(calculator.next(course, at(ist, 2026, 10, 22, 23, 0)))
+        assertEquals(at(ist, 2026, 10, 23, 6, 0), result.dueAt)
+        assertEquals(DueBasis.PLANNED_FIRST_DOSE, result.basis)
+    }
+
+    @Test fun rollingBeforeCourseStartWaitsForThePlannedFirstDose() {
+        val rule = rolling(8).copy(firstDoseAt = LocalDateTime.of(2026, 11, 1, 9, 0))
+        val result = due(calculator.next(schedule(rule, start = LocalDate.of(2026, 11, 1)), null))
+        assertEquals(at(ist, 2026, 11, 1, 9, 0), result.dueAt)
+        assertFalse(result.overdue)
+    }
+
+    @Test fun delayedConfirmationAnchorsOnAdministeredTimeNotEntryTime() {
+        // Planned 06:00, given 07:00, but only confirmed in the app at 10:00.
+        val entryTime = at(ist, 2026, 10, 23, 10, 0)
+        val ledger = DoseLedger(Clock.fixed(entryTime, ist)) { "event-1" }
+        val occurrence = DoseOccurrence("o1", "s1", 1, at(ist, 2026, 10, 23, 6, 0), DoseOccurrenceStatus.DUE)
+        val applied = ledger.markTaken(occurrence, emptyList(), "token-1", administeredAt = at(ist, 2026, 10, 23, 7, 0))
+        val event = (applied as DoseActionResult.Applied).event
+        assertEquals(entryTime, event.recordedAt)
+
+        val last = DoseLedger.lastAdministeredAt(listOf(event))
+        val result = due(calculatorAt(entryTime).next(schedule(rolling(6)), last))
+        assertEquals(at(ist, 2026, 10, 23, 13, 0), result.dueAt)
+        assertEquals(DueBasis.ACTUAL_ADMINISTRATION, result.basis)
+        assertFalse(result.overdue)
+    }
+
+    @Test fun delayedConfirmationAfterNextDoseTimeGivesOneOverdueDose() {
+        // Given at 07:00 but confirmed only at 14:00: the 13:00 dose is overdue once, no extra doses.
+        val result = due(calculatorAt(at(ist, 2026, 10, 23, 14, 0)).next(schedule(rolling(6)), at(ist, 2026, 10, 23, 7, 0)))
+        assertEquals(at(ist, 2026, 10, 23, 13, 0), result.dueAt)
+        assertTrue(result.overdue)
+    }
+
+    @Test fun rollingIntervalIsElapsedTimeAcrossDaylightSavingChange() {
+        // New York falls back at 02:00 on 2026-11-01; 6 h after 00:30 EDT is 05:30 EST.
+        val calc = ScheduleCalculator(Clock.fixed(Instant.parse("2026-11-01T05:00:00Z"), newYork))
+        val lastDose = Instant.parse("2026-11-01T04:30:00Z")
+        val result = due(calc.next(schedule(rolling(6), zone = newYork), lastDose))
+        assertEquals(Instant.parse("2026-11-01T10:30:00Z"), result.dueAt)
+    }
+
+    @Test fun courseDatesUseTheScheduleZoneNotTheDeviceZone() {
+        val utcDevice = ScheduleCalculator(Clock.fixed(Instant.parse("2026-10-23T19:00:00Z"), ZoneOffset.UTC))
+        // 19:00Z is already 00:30 on 24 Oct in India, so a course ending 23 Oct (IST) has ended there.
+        val rollingResult = utcDevice.next(schedule(rolling(6), end = LocalDate.of(2026, 10, 23)), at(ist, 2026, 10, 23, 18, 0))
+        assertEquals(NoReminderReason.COURSE_ENDED, none(rollingResult).reason)
+        // A fixed course starting 24 Oct (IST) already applies although the device's UTC date is 23 Oct.
+        val fixed = due(utcDevice.next(schedule(threeTimes, start = LocalDate.of(2026, 10, 24)), null))
+        assertEquals(at(ist, 2026, 10, 24, 6, 0), fixed.dueAt)
+    }
+
+    @Test fun fixedTimeStartDateBoundary() {
+        val beforeStart = calculatorAt(at(ist, 2026, 10, 23, 23, 59))
+        val result = due(beforeStart.next(schedule(threeTimes, start = LocalDate.of(2026, 10, 24)), null))
+        assertEquals(at(ist, 2026, 10, 24, 6, 0), result.dueAt)
+    }
+
+    @Test fun fixedTimeMissedDosesProduceNoCatchUp() {
+        // Last dose days ago: still only the next prescribed slot, never a backlog or an overdue prompt.
+        val result = due(calculator.next(schedule(threeTimes), at(ist, 2026, 10, 20, 6, 0)))
+        assertEquals(at(ist, 2026, 10, 23, 14, 0), result.dueAt)
+        assertFalse(result.overdue)
+    }
+
+    @Test fun invalidCourseWindowProducesNoReminder() {
+        val inverted = schedule(threeTimes, start = LocalDate.of(2026, 10, 23), end = LocalDate.of(2026, 10, 22))
+        assertEquals(NoReminderReason.INVALID_COURSE_WINDOW, none(calculator.next(inverted, null)).reason)
+    }
+
     private val meals = MealTimes(LocalTime.of(8, 30), LocalTime.of(13, 0), LocalTime.of(20, 0))
 
     @Test fun mealRelativeUsesConfiguredMealTimes() {
@@ -174,6 +276,20 @@ class ScheduleCalculatorTest {
             NoReminderReason.ALREADY_RECORDED,
             none(calculator.next(schedule(future), at(ist, 2026, 10, 23, 7, 0))).reason,
         )
+    }
+
+    @Test fun oneTimeMustFallInsideTreatmentWindow() {
+        val rule = ScheduleRule.OneTime(LocalDateTime.of(2026, 10, 25, 9, 0))
+        assertEquals(
+            NoReminderReason.OUTSIDE_COURSE_WINDOW,
+            none(calculator.next(schedule(rule, end = LocalDate.of(2026, 10, 24)), null)).reason,
+        )
+        assertEquals(
+            NoReminderReason.OUTSIDE_COURSE_WINDOW,
+            none(calculator.next(schedule(rule, start = LocalDate.of(2026, 10, 26)), null)).reason,
+        )
+        val onLastDay = schedule(rule, end = LocalDate.of(2026, 10, 25))
+        assertEquals(at(ist, 2026, 10, 25, 9, 0), due(calculator.next(onLastDay, null)).dueAt)
     }
 
     @Test fun asNeededNeverSchedulesAReminder() {

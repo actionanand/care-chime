@@ -1,11 +1,15 @@
 package com.actionanand.carechime.app.ui.medicines
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.actionanand.carechime.app.domain.model.HospitalRecord
 import com.actionanand.carechime.app.domain.model.Medicine
 import com.actionanand.carechime.app.domain.model.MedicineDraft
+import com.actionanand.carechime.app.domain.model.PrescribedMedicine
 import com.actionanand.carechime.app.domain.model.ProfileMedicineDraft
 import com.actionanand.carechime.app.domain.model.ProfileMedicineItem
 import com.actionanand.carechime.app.domain.repository.HospitalRepository
@@ -34,6 +38,18 @@ const val CREATED_MEDICINE_ID_KEY = "createdMedicineId"
 fun Medicine.displayName(): String = if (brandName.isNullOrBlank() || brandName == name) name else "$name ($brandName)"
 
 fun Medicine.detailLine(): String = listOfNotNull(form.label, strength, concentration).joinToString(" · ")
+
+fun PrescribedMedicine.displayName(): String =
+    if (brandName.isNullOrBlank() || brandName == name) name else "$name ($brandName)"
+
+fun PrescribedMedicine.detailLine(): String = listOfNotNull(form.label, strength, concentration).joinToString(" · ")
+
+/** True when the library entry no longer matches what was recorded with the prescription. */
+fun PrescribedMedicine.differsFrom(medicine: Medicine): Boolean =
+    this != PrescribedMedicine(
+        medicine.name, medicine.brandName, medicine.genericNames, medicine.form,
+        medicine.strength, medicine.concentration, medicine.manufacturer,
+    )
 
 class MedicineLibraryViewModel(medicines: MedicineCatalogRepository) : ViewModel() {
     val medicines: StateFlow<List<Medicine>?> = medicines.observeMedicines().stateWhileSubscribed(this, null)
@@ -116,10 +132,15 @@ class ProfileMedicineEditViewModel(
     val hospitals: StateFlow<List<HospitalRecord>> =
         hospitals.observeHospitals(profileId).stateWhileSubscribed(this, emptyList())
 
+    /** Medicine details stored with this record; kept on save unless a different medicine is chosen. */
+    var recordedMedicine by mutableStateOf<Pair<String, PrescribedMedicine>?>(null)
+        private set
+
     init {
         if (isEditing) {
             loadExisting {
                 profileMedicines.getProfileMedicine(profileId, courseId)?.let {
+                    recordedMedicine = it.prescribedMedicine?.let { recorded -> it.medicineId to recorded }
                     ProfileMedicineInput(
                         medicineId = it.medicineId,
                         doseAmount = it.doseAmount,

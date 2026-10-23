@@ -25,6 +25,7 @@ import com.actionanand.carechime.app.domain.model.ProfileDraft
 import com.actionanand.carechime.app.domain.model.ProfileMedicine
 import com.actionanand.carechime.app.domain.model.ProfileMedicineDraft
 import com.actionanand.carechime.app.domain.model.ProfileMedicineItem
+import com.actionanand.carechime.app.domain.model.RecordedHospital
 import com.actionanand.carechime.app.domain.repository.HospitalRepository
 import com.actionanand.carechime.app.domain.repository.MedicalRecordRepository
 import com.actionanand.carechime.app.domain.repository.MedicineCatalogRepository
@@ -217,18 +218,21 @@ class RoomMedicalRecordRepository(
     override suspend fun createHistoryEntry(profileId: String, draft: MedicalHistoryDraft): String =
         db.withTransaction {
             requireProfile(profileId)
-            requireOwnedHospital(db, profileId, draft.hospitalId)
+            val hospital = requireOwnedHospital(db, profileId, draft.hospitalId)
             val now = clock.millis()
             val id = newId()
-            dao.insertHistory(draft.toEntity(id, profileId, now, now))
+            dao.insertHistory(draft.toEntity(id, profileId, now, now, hospitalSnapshot(hospital)))
             id
         }
 
     override suspend fun updateHistoryEntry(profileId: String, entryId: String, draft: MedicalHistoryDraft) {
         db.withTransaction {
             val existing = dao.getHistory(profileId, entryId) ?: throw RecordNotFoundException("History entry")
-            requireOwnedHospital(db, profileId, draft.hospitalId)
-            dao.updateHistory(draft.toEntity(entryId, profileId, existing.createdAt, clock.millis()))
+            val hospital = requireOwnedHospital(db, profileId, draft.hospitalId)
+            val snapshot = keptHospitalSnapshot(
+                existing.hospitalId, existing.hospitalName, existing.hospitalPlaceName, draft.hospitalId, hospital,
+            )
+            dao.updateHistory(draft.toEntity(entryId, profileId, existing.createdAt, clock.millis(), snapshot))
         }
     }
 
@@ -262,7 +266,13 @@ class RoomMedicalRecordRepository(
             updatedAt = updatedAt,
         )
 
-    private fun MedicalHistoryDraft.toEntity(id: String, profileId: String, createdAt: Long, updatedAt: Long) =
+    private fun MedicalHistoryDraft.toEntity(
+        id: String,
+        profileId: String,
+        createdAt: Long,
+        updatedAt: Long,
+        hospital: RecordedHospital?,
+    ) =
         HistoryEntity(
             id = id,
             profileId = profileId,
@@ -273,15 +283,36 @@ class RoomMedicalRecordRepository(
             notes = notes,
             createdAt = createdAt,
             updatedAt = updatedAt,
+            hospitalName = hospital?.hospitalName,
+            hospitalPlaceName = hospital?.placeName,
         )
 }
 
 /** Rejects links to a hospital record that belongs to a different profile. */
-private suspend fun requireOwnedHospital(db: CareChimeDatabase, profileId: String, hospitalId: String?) {
-    if (hospitalId != null && db.hospitalDao().get(profileId, hospitalId) == null) {
-        throw OwnershipException("The selected hospital")
-    }
+private suspend fun requireOwnedHospital(db: CareChimeDatabase, profileId: String, hospitalId: String?): HospitalEntity? {
+    if (hospitalId == null) return null
+    return db.hospitalDao().get(profileId, hospitalId) ?: throw OwnershipException("The selected hospital")
 }
+
+private fun hospitalSnapshot(hospital: HospitalEntity?): RecordedHospital? =
+    hospital?.let { RecordedHospital(it.hospitalName, it.placeName) }
+
+/**
+ * Keeps the hospital details recorded with an entry while its link is unchanged, including after the
+ * hospital record was deleted (link already null). A newly chosen hospital is captured afresh.
+ */
+private fun keptHospitalSnapshot(
+    existingHospitalId: String?,
+    existingName: String?,
+    existingPlaceName: String?,
+    newHospitalId: String?,
+    newHospital: HospitalEntity?,
+): RecordedHospital? =
+    if (existingHospitalId == newHospitalId && (existingName != null || newHospitalId == null)) {
+        recordedHospitalOf(existingName, existingPlaceName)
+    } else {
+        hospitalSnapshot(newHospital)
+    }
 
 class RoomMedicineCatalogRepository(
     private val db: CareChimeDatabase,
@@ -357,18 +388,41 @@ class RoomProfileMedicineRepository(
     override suspend fun createProfileMedicine(profileId: String, draft: ProfileMedicineDraft): String =
         db.withTransaction {
             db.profileDao().get(profileId) ?: throw RecordNotFoundException("Profile")
-            requireReferences(profileId, draft)
+            val medicine = requireMedicine(draft)
+            val hospital = requireOwnedHospital(db, profileId, draft.hospitalId)
             val now = clock.millis()
             val id = newId()
-            dao.insert(draft.toEntity(id, profileId, now, now))
+            dao.insert(draft.toEntity(id, profileId, now, now).withMedicine(medicine).withHospital(hospitalSnapshot(hospital)))
             id
         }
 
+    /**
+     * Prescription-time snapshots stay as recorded while the medicine/hospital link is unchanged, so
+     * later library or hospital edits never rewrite this record. Choosing a different one re-captures.
+     */
     override suspend fun updateProfileMedicine(profileId: String, courseId: String, draft: ProfileMedicineDraft) {
         db.withTransaction {
             val existing = dao.get(profileId, courseId) ?: throw RecordNotFoundException("Profile medicine")
-            requireReferences(profileId, draft)
-            dao.update(draft.toEntity(courseId, profileId, existing.createdAt, clock.millis()))
+            val medicine = requireMedicine(draft)
+            val hospital = requireOwnedHospital(db, profileId, draft.hospitalId)
+            val updated = draft.toEntity(courseId, profileId, existing.createdAt, clock.millis())
+            val withMedicine = if (existing.medicineId == draft.medicineId && existing.medicineName != null) {
+                updated.copy(
+                    medicineName = existing.medicineName,
+                    medicineBrandName = existing.medicineBrandName,
+                    medicineGenericNames = existing.medicineGenericNames,
+                    medicineForm = existing.medicineForm,
+                    medicineStrength = existing.medicineStrength,
+                    medicineConcentration = existing.medicineConcentration,
+                    medicineManufacturer = existing.medicineManufacturer,
+                )
+            } else {
+                updated.withMedicine(medicine)
+            }
+            val snapshot = keptHospitalSnapshot(
+                existing.hospitalId, existing.hospitalName, existing.hospitalPlaceName, draft.hospitalId, hospital,
+            )
+            dao.update(withMedicine.withHospital(snapshot))
         }
     }
 
@@ -376,10 +430,21 @@ class RoomProfileMedicineRepository(
         if (dao.delete(profileId, courseId) == 0) throw RecordNotFoundException("Profile medicine")
     }
 
-    private suspend fun requireReferences(profileId: String, draft: ProfileMedicineDraft) {
+    private suspend fun requireMedicine(draft: ProfileMedicineDraft): MedicineEntity =
         db.medicineDao().get(draft.medicineId) ?: throw RecordNotFoundException("Medicine")
-        requireOwnedHospital(db, profileId, draft.hospitalId)
-    }
+
+    private fun ProfileMedicineEntity.withMedicine(medicine: MedicineEntity) = copy(
+        medicineName = medicine.name,
+        medicineBrandName = medicine.brandName,
+        medicineGenericNames = medicine.genericNames,
+        medicineForm = medicine.form,
+        medicineStrength = medicine.strength,
+        medicineConcentration = medicine.concentration,
+        medicineManufacturer = medicine.manufacturer,
+    )
+
+    private fun ProfileMedicineEntity.withHospital(hospital: RecordedHospital?) =
+        copy(hospitalName = hospital?.hospitalName, hospitalPlaceName = hospital?.placeName)
 
     private fun ProfileMedicineDraft.toEntity(id: String, profileId: String, createdAt: Long, updatedAt: Long) =
         ProfileMedicineEntity(

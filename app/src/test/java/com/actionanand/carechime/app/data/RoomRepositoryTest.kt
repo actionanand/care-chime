@@ -1,6 +1,7 @@
 package com.actionanand.carechime.app.data
 
 import android.content.Context
+import android.database.sqlite.SQLiteDatabase
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.actionanand.carechime.app.data.db.CareChimeDatabase
@@ -24,11 +25,14 @@ import com.actionanand.carechime.app.domain.model.MedicalHistoryDraft
 import com.actionanand.carechime.app.domain.model.MedicineDraft
 import com.actionanand.carechime.app.domain.model.MedicineForm
 import com.actionanand.carechime.app.domain.model.MedicineRoute
+import com.actionanand.carechime.app.domain.model.PrescribedMedicine
 import com.actionanand.carechime.app.domain.model.ProfileDraft
 import com.actionanand.carechime.app.domain.model.ProfileMedicineDraft
+import com.actionanand.carechime.app.domain.model.RecordedHospital
 import com.actionanand.carechime.app.domain.repository.MedicineInUseException
 import com.actionanand.carechime.app.domain.repository.OwnershipException
 import com.actionanand.carechime.app.domain.repository.RecordNotFoundException
+import java.io.File
 import java.time.Clock
 import java.time.Instant
 import java.time.LocalDate
@@ -37,6 +41,7 @@ import java.time.ZoneOffset
 import java.util.UUID
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -62,6 +67,28 @@ private inline fun <reified T : Throwable> assertThrows(block: () -> Unit) {
         throw AssertionError("Expected ${T::class.java.simpleName} but got $e")
     }
     fail("Expected ${T::class.java.simpleName} to be thrown")
+}
+
+/** Committed Room schema JSON; Gradle runs unit tests from the app module directory. */
+private fun schemaFile(version: Int): File =
+    File("schemas/${CareChimeDatabase::class.java.name}/$version.json")
+
+/** Recreates the exact tables, indices and Room metadata of a committed schema version. */
+private fun createFromSchema(db: SQLiteDatabase, version: Int) {
+    val schema = JSONObject(schemaFile(version).readText()).getJSONObject("database")
+    assertEquals(version, schema.getInt("version"))
+    val entities = schema.getJSONArray("entities")
+    for (i in 0 until entities.length()) {
+        val entity = entities.getJSONObject(i)
+        val table = entity.getString("tableName")
+        db.execSQL(entity.getString("createSql").replace("\${TABLE_NAME}", table))
+        val indices = entity.optJSONArray("indices") ?: continue
+        for (j in 0 until indices.length()) {
+            db.execSQL(indices.getJSONObject(j).getString("createSql").replace("\${TABLE_NAME}", table))
+        }
+    }
+    val setup = schema.getJSONArray("setupQueries")
+    for (i in 0 until setup.length()) db.execSQL(setup.getString(i))
 }
 
 /* All fixtures are synthetic; never use real patient data in tests. */
@@ -212,6 +239,80 @@ class RoomRepositoryTest {
         val entry = medical.getHistoryEntry(id, entryId)!!
         assertNull(entry.hospitalId)
         assertEquals("Test visit", entry.title)
+        assertEquals(RecordedHospital("Test General Hospital", "Test City"), entry.recordedHospital)
+    }
+
+    @Test fun editingLibraryMedicineNeverRewritesRecordedPrescriptions() = runBlocking {
+        val id = profiles.createProfile(profileDraft("Test Person"))
+        val medicineId = medicines.createMedicine(medicineDraft.copy(manufacturer = "Test Labs"))
+        val courseId = courses.createProfileMedicine(id, courseDraft(medicineId))
+        val asPrescribed = PrescribedMedicine(
+            name = "Examplemol", brandName = "Example Brand", genericNames = "Example salt", form = MedicineForm.SYRUP,
+            strength = null, concentration = "120 mg/5 ml", manufacturer = "Test Labs",
+        )
+        assertEquals(asPrescribed, courses.getProfileMedicine(id, courseId)!!.prescribedMedicine)
+
+        clock.now = Instant.parse("2026-11-01T08:00:00Z")
+        medicines.updateMedicine(
+            medicineId,
+            medicineDraft.copy(
+                name = "Examplemol Forte", form = MedicineForm.TABLET, strength = "650 mg",
+                concentration = "250 mg/5 ml", manufacturer = "Other Labs",
+            ),
+        )
+        val before = courses.getProfileMedicine(id, courseId)!!
+        assertEquals(asPrescribed, before.prescribedMedicine)
+        assertEquals(Instant.parse("2026-10-23T08:00:00Z"), before.updatedAt)
+        val item = courses.observeProfileMedicines(id).first().single()
+        assertEquals(asPrescribed, item.course.prescribedMedicine)
+        assertEquals("250 mg/5 ml", item.medicine?.concentration)
+
+        // Editing the course itself (same medicine) keeps the prescription-time details.
+        courses.updateProfileMedicine(id, courseId, courseDraft(medicineId).copy(doseAmount = "2.5"))
+        val edited = courses.getProfileMedicine(id, courseId)!!
+        assertEquals("2.5", edited.doseAmount)
+        assertEquals(asPrescribed, edited.prescribedMedicine)
+
+        // Explicitly choosing a different medicine captures that medicine's current details.
+        val otherId = medicines.createMedicine(medicineDraft.copy(name = "Othermol", concentration = "5 mg/ml"))
+        courses.updateProfileMedicine(id, courseId, courseDraft(otherId))
+        val switched = courses.getProfileMedicine(id, courseId)!!.prescribedMedicine!!
+        assertEquals("Othermol", switched.name)
+        assertEquals("5 mg/ml", switched.concentration)
+    }
+
+    @Test fun editingOrDeletingHospitalKeepsRecordedHospitalOnHistoryAndPrescriptions() = runBlocking {
+        val id = profiles.createProfile(profileDraft("Test Person"))
+        val hospitalId = hospitals.createHospital(id, hospitalDraft())
+        val medicineId = medicines.createMedicine(medicineDraft)
+        val historyDraft = MedicalHistoryDraft(LocalDate.of(2026, 3, 4), "Test visit", HistoryCategory.CONSULTATION, hospitalId, null)
+        val entryId = medical.createHistoryEntry(id, historyDraft)
+        val courseId = courses.createProfileMedicine(id, courseDraft(medicineId, hospitalId))
+        val recorded = RecordedHospital("Test General Hospital", "Test City")
+
+        hospitals.updateHospital(id, hospitalId, hospitalDraft("Renamed Hospital").copy(placeName = "Elsewhere"))
+        assertEquals(recorded, medical.getHistoryEntry(id, entryId)!!.recordedHospital)
+        assertEquals(recorded, courses.getProfileMedicine(id, courseId)!!.recordedHospital)
+
+        hospitals.deleteHospital(id, hospitalId)
+        val course = courses.getProfileMedicine(id, courseId)!!
+        assertNull(course.hospitalId)
+        assertEquals(recorded, course.recordedHospital)
+
+        // Re-saving after the hospital was deleted keeps what was recorded.
+        medical.updateHistoryEntry(id, entryId, historyDraft.copy(hospitalId = null, notes = "Follow-up"))
+        courses.updateProfileMedicine(id, courseId, courseDraft(medicineId).copy(notes = "Updated"))
+        assertEquals(recorded, medical.getHistoryEntry(id, entryId)!!.recordedHospital)
+        assertEquals(recorded, courses.getProfileMedicine(id, courseId)!!.recordedHospital)
+    }
+
+    @Test fun explicitlyUnlinkingHospitalClearsRecordedHospital() = runBlocking {
+        val id = profiles.createProfile(profileDraft("Test Person"))
+        val hospitalId = hospitals.createHospital(id, hospitalDraft())
+        val draft = MedicalHistoryDraft(LocalDate.of(2026, 3, 4), "Test visit", HistoryCategory.CONSULTATION, hospitalId, null)
+        val entryId = medical.createHistoryEntry(id, draft)
+        medical.updateHistoryEntry(id, entryId, draft.copy(hospitalId = null))
+        assertNull(medical.getHistoryEntry(id, entryId)!!.recordedHospital)
     }
 
     @Test fun medicineInUseCannotBeDeleted() = runBlocking {
@@ -252,6 +353,67 @@ class DatabaseMigrationTest {
                 "Missing migration $from -> ${from + 1}",
                 CareChimeMigrations.ALL.any { it.startVersion == from && it.endVersion == from + 1 },
             )
+        }
+    }
+
+    @Test fun everySchemaVersionHasACommittedSchemaFile() {
+        for (version in 1..CareChimeDatabase.VERSION) {
+            assertTrue("Missing committed Room schema $version.json", schemaFile(version).isFile)
+        }
+    }
+
+    /** Builds a real v1 database from the committed 1.json baseline, then opens it with the current code. */
+    @Test fun migration1To2KeepsRecordsAndBackfillsSnapshots() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val name = "migration-1-2-test.db"
+        context.deleteDatabase(name)
+        val file = context.getDatabasePath(name).apply { parentFile?.mkdirs() }
+        SQLiteDatabase.openOrCreateDatabase(file, null).use { legacy ->
+            createFromSchema(legacy, version = 1)
+            legacy.execSQL("INSERT INTO profiles (id, name, createdAt, updatedAt) VALUES ('p1', 'Legacy Person', 1, 1)")
+            legacy.execSQL(
+                "INSERT INTO profile_hospitals (id, profileId, hospitalName, patientId, placeName, createdAt, updatedAt) " +
+                    "VALUES ('h1', 'p1', 'Test General Hospital', 'TEST-0001', 'Test City', 1, 1)",
+            )
+            legacy.execSQL(
+                "INSERT INTO medicines (id, name, brandName, form, concentration, manufacturer, createdAt, updatedAt) " +
+                    "VALUES ('m1', 'Examplemol', 'Example Brand', 'SYRUP', '120 mg/5 ml', 'Test Labs', 1, 1)",
+            )
+            legacy.execSQL(
+                "INSERT INTO profile_medicines (id, profileId, medicineId, doseAmount, doseUnit, foodTiming, startDate, " +
+                    "hospitalId, status, createdAt, updatedAt) " +
+                    "VALUES ('c1', 'p1', 'm1', '5', 'ml', 'AFTER_FOOD', '2026-10-01', 'h1', 'ACTIVE', 1, 1)",
+            )
+            legacy.execSQL(
+                "INSERT INTO medical_history (id, profileId, eventDate, title, category, hospitalId, createdAt, updatedAt) " +
+                    "VALUES ('e1', 'p1', '2026-03-04', 'Linked visit', 'CONSULTATION', 'h1', 1, 1), " +
+                    "('e2', 'p1', '2026-03-05', 'Unlinked visit', 'OTHER', NULL, 1, 1)",
+            )
+            legacy.version = 1
+        }
+
+        val db = Room.databaseBuilder(context, CareChimeDatabase::class.java, name)
+            .addMigrations(*CareChimeMigrations.ALL)
+            .allowMainThreadQueries()
+            .build()
+        try {
+            val clock = Clock.fixed(Instant.parse("2026-10-23T08:00:00Z"), ZoneOffset.UTC)
+            assertEquals("Legacy Person", RoomProfileRepository(db, clock).getProfile("p1")?.name)
+            val courses = RoomProfileMedicineRepository(db, clock)
+            val course = courses.getProfileMedicine("p1", "c1")!!
+            val expected = PrescribedMedicine("Examplemol", "Example Brand", null, MedicineForm.SYRUP, null, "120 mg/5 ml", "Test Labs")
+            assertEquals("5", course.doseAmount)
+            assertEquals(expected, course.prescribedMedicine)
+            assertEquals(RecordedHospital("Test General Hospital", "Test City"), course.recordedHospital)
+            val medical = RoomMedicalRecordRepository(db, clock)
+            assertEquals(RecordedHospital("Test General Hospital", "Test City"), medical.getHistoryEntry("p1", "e1")!!.recordedHospital)
+            assertNull(medical.getHistoryEntry("p1", "e2")!!.recordedHospital)
+
+            RoomMedicineCatalogRepository(db, clock).updateMedicine("m1", medicineDraft.copy(concentration = "250 mg/5 ml"))
+            assertEquals(expected, courses.getProfileMedicine("p1", "c1")!!.prescribedMedicine)
+        } finally {
+            db.close()
+            context.deleteDatabase(name)
         }
     }
 

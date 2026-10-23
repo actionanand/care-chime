@@ -83,6 +83,12 @@ data class HospitalDraft(
     val notes: String?,
 )
 
+/** Hospital details captured when a record was linked; kept if the hospital record is edited or deleted. */
+data class RecordedHospital(
+    val hospitalName: String,
+    val placeName: String?,
+)
+
 enum class AllergyCategory(override val label: String) : LabeledOption {
     MEDICATION("Medication"),
     FOOD("Food"),
@@ -165,6 +171,7 @@ data class MedicalHistoryEntry(
     val notes: String?,
     val createdAt: Instant,
     val updatedAt: Instant,
+    val recordedHospital: RecordedHospital? = null,
 )
 
 data class MedicalHistoryDraft(
@@ -260,6 +267,19 @@ data class ProfileMedicine(
     val status: CourseStatus,
     val createdAt: Instant,
     val updatedAt: Instant,
+    val prescribedMedicine: PrescribedMedicine? = null,
+    val recordedHospital: RecordedHospital? = null,
+)
+
+/** Library details captured when the prescription was recorded; later library edits never change them. */
+data class PrescribedMedicine(
+    val name: String,
+    val brandName: String?,
+    val genericNames: String?,
+    val form: MedicineForm,
+    val strength: String?,
+    val concentration: String?,
+    val manufacturer: String?,
 )
 
 data class ProfileMedicineDraft(

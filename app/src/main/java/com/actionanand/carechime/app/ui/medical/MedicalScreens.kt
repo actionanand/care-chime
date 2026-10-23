@@ -40,6 +40,7 @@ import com.actionanand.carechime.app.ui.components.LoadingBox
 import com.actionanand.carechime.app.ui.components.PickerField
 import com.actionanand.carechime.app.ui.components.SectionHeader
 import com.actionanand.carechime.app.ui.components.TextInput
+import com.actionanand.carechime.app.ui.components.describe
 import com.actionanand.carechime.app.ui.components.formatDate
 
 enum class MedicalRecordKind { ALLERGY, CONDITION, HISTORY }
@@ -122,7 +123,8 @@ fun MedicalRecordsScreen(
                         title = "${formatDate(entry.eventDate)} · ${entry.title}",
                         lines = listOfNotNull(
                             entry.category.label,
-                            entry.hospitalId?.let { data.hospitalNames[it] },
+                            entry.recordedHospital?.describe(stillLinked = entry.hospitalId != null)
+                                ?: entry.hospitalId?.let { data.hospitalNames[it] },
                             entry.notes,
                         ),
                         onClick = { onOpenRecord(profileId, MedicalRecordKind.HISTORY, entry.id) },

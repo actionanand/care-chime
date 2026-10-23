@@ -26,6 +26,7 @@ Requirements: Java 21, Gradle 9.5.0, Android SDK matching `android-sdk.propertie
 python3 scripts/validate-config.py
 python3 -m unittest discover -s scripts/tests -v
 python3 scripts/check-source-policy.py
+python3 scripts/check-room-schemas.py  # every Room schema version committed under app/schemas
 bash scripts/build-android.sh debug   # optional: needs JDK 21, Gradle 9.5 and the Android SDK
 ```
 

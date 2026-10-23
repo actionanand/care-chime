@@ -74,6 +74,16 @@ jobs:
       - name: Lint and unit tests
         run: gradle lint testDebugUnitTest
 
+      - name: Check exported Room schemas
+        shell: bash
+        run: |
+          if ! git diff --quiet -- app/schemas || [[ -n "$(git ls-files --others --exclude-standard -- app/schemas)" ]]; then
+            echo '::error::Room schemas exported by this build differ from the committed ones. Commit them on the feature branch first.'
+            git status --short -- app/schemas
+            exit 1
+          fi
+          python3 scripts/check-room-schemas.py
+
       - name: Bump version code for this build
         shell: bash
         run: |

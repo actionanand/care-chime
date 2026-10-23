@@ -51,6 +51,7 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.actionanand.carechime.app.domain.model.RecordedHospital
 import com.actionanand.carechime.app.domain.validation.FieldValidator
 import java.time.Instant
 import java.time.LocalDate
@@ -61,6 +62,10 @@ import java.time.format.FormatStyle
 private val displayDateFormatter: DateTimeFormatter = DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM)
 
 fun formatDate(date: LocalDate): String = displayDateFormatter.format(date)
+
+/** Hospital as recorded on a history entry or prescription; flagged when the hospital record was deleted. */
+fun RecordedHospital.describe(stillLinked: Boolean): String =
+    if (stillLinked) hospitalName else "$hospitalName (hospital record removed)"
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

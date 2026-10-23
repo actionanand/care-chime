@@ -16,6 +16,9 @@ enum class NoReminderReason {
     ONE_TIME_PASSED,
     ALREADY_RECORDED,
     INVALID_RULE,
+    INVALID_COURSE_WINDOW,
+    /** The rule's own date (first rolling dose or one-time dose) lies outside the treatment window. */
+    OUTSIDE_COURSE_WINDOW,
     MEAL_TIMES_NOT_SET,
 }
 
@@ -33,6 +36,9 @@ sealed interface NextReminder {
 class ScheduleCalculator(private val clock: Clock) {
 
     /**
+     * Treatment start and end dates are calendar days in the schedule's own zone (not the device's)
+     * and are inclusive. No reminder is ever produced for a time outside that window.
+     *
      * @param lastAdministeredAt actual time of the most recent confirmed administration for this
      *   schedule (from immutable dose events), or null when none was recorded.
      */
@@ -45,15 +51,19 @@ class ScheduleCalculator(private val clock: Clock) {
         if (ScheduleRuleValidator.validate(schedule.rule).isNotEmpty()) {
             return NextReminder.None(NoReminderReason.INVALID_RULE)
         }
+        val window = schedule.window
+        if (window.endDateInclusive?.isBefore(window.startDate) == true) {
+            return NextReminder.None(NoReminderReason.INVALID_COURSE_WINDOW)
+        }
         val now = clock.instant()
         val zone = schedule.zoneId
         return when (val rule = schedule.rule) {
-            is ScheduleRule.FixedTimes -> nextDaily(schedule.window, zone, now, DueBasis.FIXED_TIME) { date ->
+            is ScheduleRule.FixedTimes -> nextDaily(window, zone, now, DueBasis.FIXED_TIME) { date ->
                 rule.times.map { LocalDateTime.of(date, it) }
             }
             is ScheduleRule.MealRelative -> {
                 if (mealTimes == null) return NextReminder.None(NoReminderReason.MEAL_TIMES_NOT_SET)
-                nextDaily(schedule.window, zone, now, DueBasis.MEAL_TIME) { date ->
+                nextDaily(window, zone, now, DueBasis.MEAL_TIME) { date ->
                     rule.meals.map { meal ->
                         val mealAt = LocalDateTime.of(date, mealTimes.timeOf(meal))
                         when (rule.relation) {
@@ -64,10 +74,12 @@ class ScheduleCalculator(private val clock: Clock) {
                     }
                 }
             }
-            is ScheduleRule.RollingInterval -> nextRolling(rule, schedule.window, zone, now, lastAdministeredAt)
+            is ScheduleRule.RollingInterval -> nextRolling(rule, window, zone, now, lastAdministeredAt)
             is ScheduleRule.OneTime -> {
+                val at = rule.at.atZone(zone)
+                if (!window.contains(at.toLocalDate())) return NextReminder.None(NoReminderReason.OUTSIDE_COURSE_WINDOW)
                 if (lastAdministeredAt != null) return NextReminder.None(NoReminderReason.ALREADY_RECORDED)
-                val dueAt = rule.at.atZone(zone).toInstant()
+                val dueAt = at.toInstant()
                 if (dueAt.isAfter(now)) {
                     NextReminder.Due(dueAt, DueBasis.ONE_TIME, overdue = false)
                 } else {
@@ -81,6 +93,12 @@ class ScheduleCalculator(private val clock: Clock) {
         }
     }
 
+    /**
+     * Interval counted from the actual administration time (elapsed time, so DST changes do not
+     * stretch or shrink it). Administrations before the course start never anchor the schedule.
+     * A missed dose yields one overdue due time; it is never multiplied into catch-up doses, and
+     * nothing is reminded once the course has ended.
+     */
     private fun nextRolling(
         rule: ScheduleRule.RollingInterval,
         window: CourseWindow,
@@ -88,18 +106,29 @@ class ScheduleCalculator(private val clock: Clock) {
         now: Instant,
         lastAdministeredAt: Instant?,
     ): NextReminder {
-        val (dueAt, basis) = if (lastAdministeredAt != null) {
-            lastAdministeredAt.plus(rule.interval) to DueBasis.ACTUAL_ADMINISTRATION
+        val firstDose = rule.firstDoseAt.atZone(zone)
+        if (!window.contains(firstDose.toLocalDate())) return NextReminder.None(NoReminderReason.OUTSIDE_COURSE_WINDOW)
+        val windowStart = window.startDate.atStartOfDay(zone).toInstant()
+        val anchor = lastAdministeredAt?.takeIf { !it.isBefore(windowStart) }
+        val (dueAt, basis) = if (anchor != null) {
+            anchor.plus(rule.interval) to DueBasis.ACTUAL_ADMINISTRATION
         } else {
-            rule.firstDoseAt.atZone(zone).toInstant() to DueBasis.PLANNED_FIRST_DOSE
+            firstDose.toInstant() to DueBasis.PLANNED_FIRST_DOSE
         }
-        val dueDate = dueAt.atZone(zone).toLocalDate()
         val end = window.endDateInclusive
-        if (end != null && dueDate.isAfter(end)) return NextReminder.None(NoReminderReason.COURSE_ENDED)
+        if (end != null) {
+            val dueDate = dueAt.atZone(zone).toLocalDate()
+            val today = now.atZone(zone).toLocalDate()
+            if (dueDate.isAfter(end) || today.isAfter(end)) return NextReminder.None(NoReminderReason.COURSE_ENDED)
+        }
         return NextReminder.Due(dueAt, basis, overdue = dueAt.isBefore(now))
     }
 
-    /** Earliest wall-clock occurrence strictly after [now] whose calendar day is inside the course. */
+    /**
+     * Earliest wall-clock occurrence strictly after [now] whose calendar day is inside the course.
+     * Prescribed times never move after late administration, and past slots are not returned as
+     * catch-up doses; marking them missed is the dose ledger's job.
+     */
     private fun nextDaily(
         window: CourseWindow,
         zone: ZoneId,
