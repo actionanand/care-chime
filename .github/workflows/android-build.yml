@@ -1,0 +1,152 @@
+name: Care Chime Android APK and AAB
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main-android]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: care-chime-android-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.ref == 'refs/heads/main-android'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read Android SDK settings
+        shell: bash
+        run: |
+          while IFS='=' read -r key value; do
+            [[ -z "$key" || "$key" =~ ^# ]] && continue
+            echo "$key=$value" >> "$GITHUB_ENV"
+          done < android-sdk.properties
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install configured SDK packages
+        shell: bash
+        run: |
+          sdkmanager --install "platforms;android-${COMPILE_SDK_VERSION}" "build-tools;${BUILD_TOOLS_VERSION}" "platform-tools"
+
+      - name: Set up Gradle 9.5
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.5.0'
+
+      - name: Validate repository configuration and scripts
+        run: |
+          python3 scripts/validate-config.py
+          python3 -m unittest discover -s scripts/tests -v
+
+      - name: Lint and unit tests
+        run: gradle lint testDebugUnitTest
+
+      - name: Bump version code for this build
+        shell: bash
+        run: |
+          python3 scripts/bump-android-version.py
+          python3 scripts/validate-config.py
+          VERSION_CODE=$(python3 -c 'import json; print(json.load(open("android-version.json"))["versionCode"])')
+          VERSION_NAME=$(python3 -c 'import json; print(json.load(open("android-version.json"))["versionName"])')
+          RELEASE_BASENAME=$(python3 -c 'import json; print(json.load(open("app-config.json"))["releaseBaseName"])')
+          echo "VERSION_CODE=$VERSION_CODE" >> "$GITHUB_ENV"
+          echo "VERSION_NAME=$VERSION_NAME" >> "$GITHUB_ENV"
+          echo "RELEASE_PREFIX=releases/${RELEASE_BASENAME}-${VERSION_NAME}-${VERSION_CODE}" >> "$GITHUB_ENV"
+
+      - name: Build unsigned release APK and AAB
+        run: gradle clean assembleRelease bundleRelease
+
+      - name: Collect latest unsigned artifacts
+        shell: bash
+        run: |
+          mkdir -p releases
+          find releases -maxdepth 1 -type f \( -name '*.apk' -o -name '*.aab' -o -name '*-mapping.txt' \) -delete
+          UNSIGNED_APK=$(find app/build/outputs/apk/release -name '*-unsigned.apk' -type f | head -n 1)
+          UNSIGNED_AAB=$(find app/build/outputs/bundle/release -name '*-release.aab' -type f | head -n 1)
+          test -s "$UNSIGNED_APK"
+          test -s "$UNSIGNED_AAB"
+          cp "$UNSIGNED_APK" "${RELEASE_PREFIX}-unsigned.apk"
+          cp "$UNSIGNED_AAB" "${RELEASE_PREFIX}-unsigned.aab"
+          if [[ -s app/build/outputs/mapping/release/mapping.txt ]]; then
+            cp app/build/outputs/mapping/release/mapping.txt "${RELEASE_PREFIX}-mapping.txt"
+          fi
+
+      - name: Sign APK and AAB when signing secrets are configured
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          present=0
+          for value in "$KEYSTORE_BASE64" "$KEYSTORE_PASSWORD" "$KEY_ALIAS"; do
+            if [[ -n "$value" ]]; then present=$((present + 1)); fi
+          done
+          if (( present == 0 )); then
+            echo 'No signing secrets configured: retaining explicitly unsigned APK/AAB.'
+          elif (( present != 3 )); then
+            echo 'Some required signing secrets are missing. Refusing a partially configured signed build.' >&2
+            exit 1
+          else
+            bash scripts/sign-release.sh \
+              "${RELEASE_PREFIX}-unsigned.apk" \
+              "${RELEASE_PREFIX}-unsigned.aab" \
+              "$RELEASE_PREFIX"
+            rm -f "${RELEASE_PREFIX}-unsigned.apk" "${RELEASE_PREFIX}-unsigned.aab"
+          fi
+
+      - name: Validate release outputs
+        shell: bash
+        run: |
+          test "$(find releases -maxdepth 1 -name '*.apk' | wc -l)" -eq 1
+          test "$(find releases -maxdepth 1 -name '*.aab' | wc -l)" -eq 1
+          ls -lh releases/*.apk releases/*.aab
+          {
+            echo '## Care Chime Android build'
+            echo "- Version: ${VERSION_NAME} (${VERSION_CODE})"
+            echo '- Artifacts:'
+            find releases -maxdepth 1 -type f \( -name '*.apk' -o -name '*.aab' \) -printf '  - %f\n'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: care-chime-${{ env.VERSION_NAME }}-${{ env.VERSION_CODE }}
+          path: |
+            releases/*.apk
+            releases/*.aab
+            releases/*-mapping.txt
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Commit built version and artifacts to main-android
+        shell: bash
+        run: |
+          git fetch origin main-android
+          REMOTE_HEAD=$(git rev-parse origin/main-android)
+          if [[ "$REMOTE_HEAD" != "$(git rev-parse HEAD)" ]]; then
+            echo 'main-android changed during build; refusing to commit potentially stale artifacts.' >&2
+            exit 1
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git add -A android-version.json releases/
+          git commit -m "build: Care Chime Android ${VERSION_NAME} (${VERSION_CODE}) [skip ci]"
+          git push origin HEAD:main-android

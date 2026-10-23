@@ -1,0 +1,10 @@
+{
+  "name": "care-chime-dev-tools",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Local keystore helpers only. Android builds use Gradle.",
+  "scripts": {
+    "generate-keystore": "node scripts/generate-keystore.mjs",
+    "keystore:type": "node scripts/detect-keystore-format.mjs"
+  }
+}
