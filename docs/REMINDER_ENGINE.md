@@ -1,4 +1,20 @@
-# Reminder scheduling model (design, not yet implemented)
+# Reminder scheduling model
+
+## Implementation status
+
+Implemented as **pure Kotlin domain code** in `app/src/main/java/.../domain/schedule` with JVM unit tests (`ScheduleCalculatorTest`, `DoseLedgerTest`). Nothing is persisted or scheduled with Android yet: there are **no alarms, receivers, notifications or permissions** in this build.
+
+- `ScheduleRule` (`FixedTimes`, `RollingInterval`, `MealRelative`, `OneTime`, `AsNeeded`) with `RULE_FORMAT_VERSION = 1` for the future versioned JSON form shared with the Angular app.
+- `ScheduleRuleValidator`: technical consistency only (non-empty/unique times, rolling must be `prescriptionConfirmed`, meal offset 0–3 h and 0 for "with meal", positive PRN interval). It does not validate clinical correctness.
+- `ScheduleCalculator(clock)`: returns at most **one** `NextReminder.Due(dueAt, basis, overdue)` or `NextReminder.None(reason, earliestEligibleAt?)`. Time zone comes from the schedule; the clock is injected.
+  - Fixed and meal-relative: next occurrence strictly after now inside the course window; late or early administration never shifts them. DST gaps shift forward once; DST overlaps fire once.
+  - Rolling: `lastAdministeredAt + interval` (from the actual confirmed time), else the planned first dose. A long gap yields a single overdue due time — never multiple or catch-up doses.
+  - One-time: due if in the future and not already recorded.
+  - PRN: never a reminder; `earliestEligibleAt` is an informational guardrail only.
+  - Paused, completed or discontinued courses produce no reminder.
+- `DoseLedger(clock, idGenerator)`: append-only `DoseEvent`s with separate `administeredAt` and `recordedAt`; `actionToken` makes every action idempotent; a second Taken on a taken dose is rejected; skipped doses need a correction (future) rather than a silent change; snoozing never changes `plannedAt`; future administration times are rejected.
+
+Next phase: persist schedules, occurrences and events (Room v2 + migration), then AlarmManager/receivers/notification channels with permission handling and device testing.
 
 ## Separate schedule types
 

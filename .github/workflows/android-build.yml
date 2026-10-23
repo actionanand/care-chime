@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout branch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -31,18 +31,34 @@ jobs:
           done < android-sdk.properties
 
       - name: Set up JDK 21
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '21'
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
+        with:
+          # The legacy SDK "tools" package was retired; install only command-line tools here
+          # and the exact platform/build-tools from android-sdk.properties below (LocalTell setup).
+          packages: ''
+
+      - name: Install Android CLI
+        shell: bash
+        run: |
+          curl -fsSL https://dl.google.com/android/cli/latest/linux_x86_64/install.sh | bash
+          test -n "${ANDROID_HOME:-}"
+          printf '%s\n' "--sdk=${ANDROID_HOME}" > "$HOME/.androidrc"
+          echo "$HOME/.android/bin" >> "$GITHUB_PATH"
 
       - name: Install configured SDK packages
         shell: bash
         run: |
-          sdkmanager --install "platforms;android-${COMPILE_SDK_VERSION}" "build-tools;${BUILD_TOOLS_VERSION}" "platform-tools"
+          android --version
+          android sdk install \
+            "platforms/android-${COMPILE_SDK_VERSION}" \
+            "build-tools/${BUILD_TOOLS_VERSION}" \
+            "platform-tools"
 
       - name: Set up Gradle 9.5
         uses: gradle/actions/setup-gradle@v4
@@ -53,6 +69,7 @@ jobs:
         run: |
           python3 scripts/validate-config.py
           python3 -m unittest discover -s scripts/tests -v
+          python3 scripts/check-source-policy.py
 
       - name: Lint and unit tests
         run: gradle lint testDebugUnitTest
@@ -124,6 +141,17 @@ jobs:
             echo '- Artifacts:'
             find releases -maxdepth 1 -type f \( -name '*.apk' -o -name '*.aab' \) -printf '  - %f\n'
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload lint and test reports on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: care-chime-release-reports
+          path: |
+            app/build/reports/
+            app/build/test-results/
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4

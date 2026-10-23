@@ -6,7 +6,7 @@
 
 Care Chime is an **offline-first Android health-care organizer** planned for medicine and water reminders, actual-dose logging, family profiles, hospital IDs, medical history, vaccination records, and encrypted portable backups. A companion Angular web app may come later.
 
-**Project status: Initial native Android scaffold.** The app currently displays a working Compose navigation shell. **It does not yet schedule alarms, store health records, provide dosage guidance, or produce encrypted backups.** Do not rely on this starter for medication reminders.
+**Project status: records foundation (pending GitHub Actions verification).** The app stores, on device only, family profiles (with automatically calculated age), unlimited hospitals and patient IDs per profile, allergies (medication and other), existing conditions, dated medical history, a reusable medicine library and profile-specific prescribed medicine records. Reminder scheduling rules exist as tested pure domain code only. **It does not yet schedule alarms or notifications, provide dosage guidance, or produce encrypted backups.** Do not rely on it for medication reminders.
 
 | Property | Value |
 | --- | --- |
@@ -25,21 +25,25 @@ Requirements: Java 21, Gradle 9.5.0, Android SDK matching `android-sdk.propertie
 ```bash
 python3 scripts/validate-config.py
 python3 -m unittest discover -s scripts/tests -v
-bash scripts/build-android.sh debug
+python3 scripts/check-source-policy.py
+bash scripts/build-android.sh debug   # optional: needs JDK 21, Gradle 9.5 and the Android SDK
 ```
+
+Android compilation, lint, unit tests (including Robolectric Room tests) and APK/AAB builds are verified by GitHub Actions: **Care Chime Android CI checks** runs on every feature branch and pull request and uploads a debug APK for device testing; the release workflow runs only on `main-android`.
 
 Android project lives **at the repository root** (`app/`, `settings.gradle.kts`, etc.), matching the LocalTell convention. There is no committed Gradle wrapper JAR; install Gradle 9.5 locally or let GitHub Actions supply it.
 
 ## Repo structure
 
 ```text
-app/                          Native Compose Android starter
+app/                          Native Compose app (domain / data (Room) / ui layers)
+app/schemas/                  Exported Room schema JSON (migration baseline)
 app-config.json               App identity, name, tagline, release file prefix
 android-version.json          versionCode and versionName source of truth
 android-sdk.properties        Compile/target/min SDK and Build Tools versions
-.github/workflows/            main-android APK/AAB CI
+.github/workflows/            android-ci.yml (branches/PRs) + android-build.yml (main-android release)
 branding/                     Generated branding PNGs
-scripts/                      Build, signing, validation, keystore, version bump
+scripts/                      Build, signing, validation, source policy, keystore, version bump
 releases/                     GitHub-built APK/AAB outputs (latest only)
 docs/                         Architecture, reminder, data, backup, web and builds
 Agent.md + AGENTS.md          AI implementation directions

@@ -1,8 +1,19 @@
 # Architecture and module boundaries
 
+## Release 1: Records foundation (implemented on `feature/1-basic-setup`)
+
+Package root `com.actionanand.carechime.app`:
+
+- `domain/` — framework-free: `model/` (profiles, hospitals, allergies, conditions, history, medicine catalog, profile medicines and enums), `age/AgeCalculator`, `validation/` (raw text input → typed drafts with field-keyed messages), `repository/` (interfaces + `DomainException`s), `schedule/` (rule calculator and dose ledger).
+- `data/` — `db/` (Room entities, DAOs, `CareChimeDatabase`, `CareChimeMigrations`) and `repository/` (Room implementations + mappers). Repositories take an injected `Clock` and ID generator.
+- `ui/` — Jetpack Compose + Material 3. `navigation/CareChimeNavigation.kt` holds string routes, a bottom bar (Home, Profiles, Medicines, Settings) and a `NavHost`. Each feature has ViewModels created by `AppViewModelProvider` (route arguments via `SavedStateHandle`). Form screens share `RecordEditorViewModel` + `EditorScaffold`.
+- `AppContainer` / `CareChimeApplication` — manual dependency container; the database opens lazily.
+
+Screens: Home dashboard, Family profiles, Profile details, Profile editor, Hospitals (view/open map link) + editor, Medical records (medication allergies, other allergies, conditions, dated history) + three editors, Medicine library (search) + editor, Profile medicines + editor (pick from library or create a new library entry and return), Settings (about, privacy/storage, unavailable features, medical safety).
+
 ## Release 0: Bootstrap
 
-Native Android Kotlin + Jetpack Compose shell under `app/`, Gradle at repo root. No cloud backend, login, patient storage, alarms or backup implementation yet. The generated UI intentionally identifies itself as a starter.
+Native Android Kotlin + Jetpack Compose shell under `app/`, Gradle at repo root.
 
 ## Planned Android layers
 

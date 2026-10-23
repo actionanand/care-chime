@@ -12,4 +12,7 @@ Only after user demand, introduce backend with explicit opt-in, appropriate secu
 
 ## Contract
 
+Android keeps scheduling decisions in framework-free Kotlin (`domain/schedule`, rule format version 1) so the same rules and test cases can be reproduced in TypeScript.
+
+
 `shared/schemas/` will eventually hold language-neutral, versioned exports and validation fixtures. Never share an Android raw SQLite file as the sole web contract.

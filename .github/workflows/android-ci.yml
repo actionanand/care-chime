@@ -1,0 +1,118 @@
+name: Care Chime Android CI checks
+
+# Build verification for feature branches and pull requests. This workflow never bumps
+# versionCode, never signs, never commits and never writes to releases/ — release builds
+# happen only in android-build.yml on main-android.
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches-ignore: [main-android]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: care-chime-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Read Android SDK settings
+        shell: bash
+        run: |
+          while IFS='=' read -r key value; do
+            [[ -z "$key" || "$key" =~ ^# ]] && continue
+            echo "$key=$value" >> "$GITHUB_ENV"
+          done < android-sdk.properties
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: ''
+
+      - name: Install Android CLI
+        shell: bash
+        run: |
+          curl -fsSL https://dl.google.com/android/cli/latest/linux_x86_64/install.sh | bash
+          test -n "${ANDROID_HOME:-}"
+          printf '%s\n' "--sdk=${ANDROID_HOME}" > "$HOME/.androidrc"
+          echo "$HOME/.android/bin" >> "$GITHUB_PATH"
+
+      - name: Install configured SDK packages
+        shell: bash
+        run: |
+          android --version
+          android sdk install \
+            "platforms/android-${COMPILE_SDK_VERSION}" \
+            "build-tools/${BUILD_TOOLS_VERSION}" \
+            "platform-tools"
+
+      - name: Set up Gradle 9.5
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.5.0'
+
+      - name: Validate configuration, scripts and source policy
+        run: |
+          python3 scripts/validate-config.py
+          python3 -m unittest discover -s scripts/tests -v
+          python3 scripts/check-source-policy.py
+
+      - name: Lint and unit tests (domain + Robolectric Room)
+        run: gradle lint testDebugUnitTest
+
+      - name: Build debug APK and unsigned release APK/AAB
+        run: gradle assembleDebug assembleRelease bundleRelease
+
+      - name: Check exported Room schemas
+        shell: bash
+        run: |
+          if ! git diff --quiet -- app/schemas; then
+            echo '::error::A committed Room schema changed. Bump the database version and add a Migration instead.'
+            git diff --stat -- app/schemas
+            exit 1
+          fi
+          untracked=$(git ls-files --others --exclude-standard -- app/schemas)
+          if [[ -n "$untracked" ]]; then
+            echo "::warning::Room schema file(s) generated but not committed: ${untracked//$'\n'/, }. Download the room-schemas artifact and commit it."
+          fi
+
+      - name: Upload Room schemas
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: room-schemas
+          path: app/schemas/
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: Upload debug APK for device testing
+        uses: actions/upload-artifact@v4
+        with:
+          name: care-chime-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload lint and test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: care-chime-ci-reports
+          path: |
+            app/build/reports/
+            app/build/test-results/
+          if-no-files-found: ignore
+          retention-days: 14

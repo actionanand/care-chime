@@ -13,9 +13,13 @@ Project identity (immutable):
 
 First read `Agent.md`, `AGENTS.md`, README and every `docs/*.md`, particularly `docs/ANDROID.md`, `docs/REMINDER_ENGINE.md`, `docs/DATA_MODEL.md` and `docs/SECURITY.md`.
 
+**Build verification policy (correction to earlier versions of this prompt):** Android compilation, lint, Android unit tests and APK/AAB generation are delegated to GitHub Actions (`android-ci.yml` for feature branches/PRs, `android-build.yml` for `main-android` releases). Do **not** stop or spend time installing an Android SDK, Android Studio, Gradle or JDK locally. Run the non-Android checks listed in `Agent.md`, and report Android checks as "Not locally verified — pending GitHub Actions". Never claim uncompiled code is build-verified, and never weaken CI checks.
+
+**Status:** Task 1 CI/icon fixes and the Task 2 vertical slice (Room schema v1, profiles, hospitals, medical records, medicine library, profile medicines, Compose navigation) and the pure Task 3.1/3.2 domain contracts are implemented on `feature/1-basic-setup`; confirm them in GitHub Actions before continuing.
+
 **Task 1 — Verify the scaffold, don't jump ahead:**
 1. Compare the starter against existing care-chime repo, preserve the user's own commits and branch conventions, and migrate/import scaffold carefully. Do not overwrite existing work.
-2. Confirm project compiles on JDK 21 / Gradle 9.5 / SDK defined in `android-sdk.properties`. Run unit tests, lint, assembleDebug, assembleRelease and bundleRelease. Fix actual compatibility problems if necessary.
+2. Confirm in GitHub Actions that the project compiles on JDK 21 / Gradle 9.5 / SDK defined in `android-sdk.properties`, with unit tests, lint, assembleDebug, assembleRelease and bundleRelease. Fix actual compatibility problems if necessary.
 3. Verify `main-android` GitHub Actions: successful APK/AAB generation, source-of-truth JSON configs, atomic versionCode+artifact commit only after success, versionName unchanged, verified keystore signing and correct `releases/` contents. If signing secrets aren't set, publish explicit `-unsigned` outputs only.
 4. Verify branded PNGs display correctly in app icon and README. Refine adaptive launcher icon/round assets if needed; avoid a white border.
 5. Update `docs/ANDROID.md` with every build/signing/CI change.

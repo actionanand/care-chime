@@ -5,20 +5,25 @@
 - [x] Root config, versioning script and basic tests
 - [x] `main-android` APK/AAB workflow and signing scripts
 - [x] Android build documentation and AI instructions
-- [ ] GitHub Actions execution / APK smoke test (requires Android SDK CI)
+- [x] Feature-branch CI workflow (`android-ci.yml`), LocalTell-style SDK installation, source policy checks
+- [x] Adaptive launcher icon without white corners
+- [ ] GitHub Actions execution / APK smoke test on a physical device (pending first CI run)
 
-## Phase 1 — Family records
-- [ ] Room database, migrations and profile CRUD
-- [ ] DOB/approximate age, optional relationship and blood group
-- [ ] Multiple hospitals per profile; hospital IDs, map links
-- [ ] Conditions, allergies, medicine allergies and medical history
-- [ ] Generic medicine library, profile medicine courses
+## Phase 1 — Family records (implemented; pending CI verification)
+- [x] Room database (schema v1), explicit migration list and profile CRUD
+- [x] DOB/approximate age, optional relationship and blood group
+- [x] Multiple hospitals per profile; hospital IDs, doctor, map links
+- [x] Conditions, allergies, medicine allergies and medical history
+- [x] Generic medicine library, profile medicines
+- [ ] Commit generated `app/schemas` v1 JSON from the CI artifact
 
 ## Phase 2 — Reminder reliability
-- [ ] Pure recurrence and interval engine with tests
-- [ ] Fixed, rolling, PRN and meal-time schedule rules
+- [x] Pure recurrence and interval engine with tests (domain only)
+- [x] Fixed, rolling, PRN, one-time and meal-time schedule rules (domain only)
+- [x] Idempotent dose event ledger with actual vs recorded time (domain only)
+- [ ] Persist schedules, occurrences and dose events (Room v2 + migration tests)
 - [ ] AlarmManager/receivers/channels and permissions
-- [ ] Actual-dose event, snooze, skip, stop/pause
+- [ ] Actual-dose UI, snooze, skip, stop/pause actions
 - [ ] Boot/timezone/permission/restore recovery tests
 
 ## Phase 3 — Extended care

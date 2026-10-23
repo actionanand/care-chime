@@ -2,6 +2,8 @@
 
 **No backup/encryption implementation exists in this starter.** This document is the future interoperability contract to finalize before shipping.
 
+The export payload will reuse the storage conventions already fixed by Room schema v1 (UUID string IDs, ISO `yyyy-MM-dd` dates, epoch-millisecond instants, enum constant names, decimal-text dose amounts); see [DATA_MODEL.md](DATA_MODEL.md).
+
 ## Requirements
 
 - User-supplied password, password confirmation and no server dependency.

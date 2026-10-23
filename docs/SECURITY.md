@@ -1,7 +1,9 @@
 # Privacy, security and safety guidelines
 
-- **Offline-first**: do not add internet permission or analytics without explicit, documented functionality and opt-in decisions.
-- **Health data**: use app-private storage, encryption at rest where feasible, strict logging/redaction and user-controlled export.
+- **Offline-first**: do not add internet permission or analytics without explicit, documented functionality and opt-in decisions. Opening a hospital's Google Maps link hands an `https` URL to another app; Care Chime itself has no network access.
+- **Health data**: use app-private storage, encryption at rest where feasible, strict logging/redaction and user-controlled export. Error messages shown to users never echo entered medical content.
+- **Enforcement**: `scripts/check-source-policy.py` (run locally and in both workflows) fails on Android/stdout logging, `printStackTrace`, an INTERNET permission, `allowBackup` not false, destructive Room migrations and `OnConflictStrategy.REPLACE`.
+- **Test data**: tests use synthetic names only; never commit real patient data, database files or exports.
 - **Backups**: authenticated password encryption; no unencrypted cloud or auto backup. `allowBackup=false` and extraction exclusions are set in the starter manifest.
 - **No clinical inference**: app tracks *entered instructions*. Do not calculate pediatric dose solely from age/weight or modify prescribed schedule to catch up missed medication.
 - **Reminders**: never claim guaranteed delivery with phone off, app force-stopped or permissions disabled. Track alarm reliability state.

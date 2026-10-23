@@ -1,8 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!-- Compose draws all UI; system bar appearance is handled by enableEdgeToEdge(). -->
     <style name="Theme.CareChime" parent="android:style/Theme.Material.Light.NoActionBar">
-        <item name="android:windowLightStatusBar">true</item>
-        <item name="android:statusBarColor">#F7F8FF</item>
-        <item name="android:navigationBarColor">#F7F8FF</item>
+        <item name="android:windowBackground">@color/window_background</item>
     </style>
 </resources>
