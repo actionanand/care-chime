@@ -294,6 +294,12 @@ class RoomRepositoryTest {
         assertEquals(recorded, medical.getHistoryEntry(id, entryId)!!.recordedHospital)
         assertEquals(recorded, courses.getProfileMedicine(id, courseId)!!.recordedHospital)
 
+        // Editing the records while still linked to the renamed hospital keeps what was recorded.
+        medical.updateHistoryEntry(id, entryId, historyDraft.copy(title = "Test visit (edited)"))
+        courses.updateProfileMedicine(id, courseId, courseDraft(medicineId, hospitalId).copy(doseAmount = "2.5"))
+        assertEquals(recorded, medical.getHistoryEntry(id, entryId)!!.recordedHospital)
+        assertEquals(recorded, courses.getProfileMedicine(id, courseId)!!.recordedHospital)
+
         hospitals.deleteHospital(id, hospitalId)
         val course = courses.getProfileMedicine(id, courseId)!!
         assertNull(course.hospitalId)

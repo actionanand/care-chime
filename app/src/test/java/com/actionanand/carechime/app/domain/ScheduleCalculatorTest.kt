@@ -261,6 +261,30 @@ class ScheduleCalculatorTest {
         assertEquals(at(ist, 2026, 10, 24, 0, 15), due(calc.next(schedule(rule), null, lateDinner)).dueAt)
     }
 
+    @Test fun beforeMealReminderCrossingBeforeCourseStartIsSkipped() {
+        val earlyBreakfast = MealTimes(LocalTime.of(0, 15), LocalTime.of(13, 0), LocalTime.of(20, 0))
+        val rule = ScheduleRule.MealRelative(setOf(Meal.BREAKFAST), MealRelation.BEFORE, Duration.ofMinutes(30))
+        // 24 Oct breakfast would be reminded at 23:45 on 23 Oct, the day before the course starts.
+        val result = due(calculator.next(schedule(rule, start = LocalDate.of(2026, 10, 24)), null, earlyBreakfast))
+        assertEquals(at(ist, 2026, 10, 24, 23, 45), result.dueAt)
+    }
+
+    @Test fun afterMealReminderCrossingBeyondCourseEndIsSkipped() {
+        val lateDinner = MealTimes(LocalTime.of(8, 0), LocalTime.of(13, 0), LocalTime.of(23, 45))
+        val rule = ScheduleRule.MealRelative(setOf(Meal.DINNER), MealRelation.AFTER, Duration.ofMinutes(30))
+        // The last-day dinner reminder would fall at 00:15 on 24 Oct, after the course ends.
+        val result = calculator.next(schedule(rule, end = LocalDate.of(2026, 10, 23)), null, lateDinner)
+        assertEquals(NoReminderReason.COURSE_ENDED, none(result).reason)
+    }
+
+    @Test fun mealReminderCrossingMidnightInsideTheCourseIsKept() {
+        val lateDinner = MealTimes(LocalTime.of(8, 0), LocalTime.of(13, 0), LocalTime.of(23, 45))
+        val rule = ScheduleRule.MealRelative(setOf(Meal.DINNER), MealRelation.AFTER, Duration.ofMinutes(30))
+        val lateEvening = calculatorAt(at(ist, 2026, 10, 23, 23, 0))
+        val result = due(lateEvening.next(schedule(rule, end = LocalDate.of(2026, 10, 24)), null, lateDinner))
+        assertEquals(at(ist, 2026, 10, 24, 0, 15), result.dueAt)
+    }
+
     @Test fun mealRelativeNeedsMealTimes() {
         val rule = ScheduleRule.MealRelative(setOf(Meal.LUNCH), MealRelation.WITH, Duration.ZERO)
         assertEquals(NoReminderReason.MEAL_TIMES_NOT_SET, none(calculator.next(schedule(rule), null)).reason)
@@ -304,7 +328,7 @@ class ScheduleCalculatorTest {
     @Test fun daylightSavingGapShiftsForwardOnce() {
         val calc = ScheduleCalculator(Clock.fixed(at(newYork, 2026, 3, 8, 0, 0), newYork))
         val rule = ScheduleRule.FixedTimes(listOf(LocalTime.of(2, 30)))
-        val result = due(calc.next(schedule(rule, zone = newYork), null))
+        val result = due(calc.next(schedule(rule, start = LocalDate.of(2026, 3, 1), zone = newYork), null))
         assertEquals(Instant.parse("2026-03-08T07:30:00Z"), result.dueAt)
     }
 

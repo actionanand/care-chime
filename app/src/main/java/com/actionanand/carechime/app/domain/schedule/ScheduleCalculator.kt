@@ -125,7 +125,8 @@ class ScheduleCalculator(private val clock: Clock) {
     }
 
     /**
-     * Earliest wall-clock occurrence strictly after [now] whose calendar day is inside the course.
+     * Earliest wall-clock occurrence strictly after [now] whose meal/calendar day and whose actual
+     * instant both fall inside the course, so meal offsets crossing midnight never leave the window.
      * Prescribed times never move after late administration, and past slots are not returned as
      * catch-up doses; marking them missed is the dose ledger's job.
      */
@@ -147,7 +148,9 @@ class ScheduleCalculator(private val clock: Clock) {
         while (!date.isAfter(lastDate)) {
             if (end != null && date.isAfter(end)) break
             occurrencesOn(date)
-                .map { it.atZone(zone).toInstant() }
+                .map { it.atZone(zone) }
+                .filter { window.contains(it.toLocalDate()) }
+                .map { it.toInstant() }
                 .filterTo(candidates) { it.isAfter(now) }
             date = date.plusDays(1)
         }

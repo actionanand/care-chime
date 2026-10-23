@@ -23,6 +23,15 @@ The medicine library and hospital records are editable reference data, so a reco
 - When a profile medicine is created, the library entry's name, brand, generic names, form, strength, concentration and manufacturer are copied into the `medicine*` columns. Editing the library entry later never changes them. Editing the profile medicine keeps them while `medicineId` is unchanged; explicitly choosing a different medicine captures that medicine's current details.
 - When history or a profile medicine is linked to a hospital, its `hospitalName` and `placeName` are copied. They survive hospital edits and hospital deletion (`hospitalId` becomes null via SET NULL, the recorded name stays and the UI marks it "hospital record removed"). Explicitly unlinking the hospital in the editor clears them.
 - The UI shows the recorded details; the medicine list notes when the library entry has changed since.
+- **Patient ID (assessed, not snapshotted in v2).** Name and place identify *where* care happened but not the patient's record there; after a hospital record is deleted its patient ID is gone. v2 intentionally keeps its exact CI-generated schema, so the patient ID is not copied yet and the delete confirmation tells the user it will not be kept. Planned for the next schema version (with schedule persistence): add nullable `hospitalPatientId` to `medical_history` and `profile_medicines`, captured with the other hospital snapshot fields and backfilled by an additive migration for rows still linked to a hospital, with a migration test from the committed `2.json`. Patient IDs are personal data: never log or export them unencrypted.
+
+### Future dose history identity (design rule for the schedule/dose schema)
+
+A medication course is editable (dose, unit, route, medicine). Actual-dose history must keep what was given at the time:
+
+- `DoseOccurrence` stores `scheduleId`, the schedule `revision`, the `profileMedicineId` and `plannedAt`; a course or schedule edit creates a new revision and never rewrites existing occurrences.
+- `DoseEvent` (append-only) copies at recording time the medicine identity from the course snapshot (`medicineName`, `brandName`, `form`, `strength`, `concentration`) plus the prescribed `doseAmount`/`doseUnit`/`route`, alongside `administeredAt` and `recordedAt`.
+- Reading history never joins back to the current course or library entry for these fields; corrections are new events (`correctionOf`), not updates.
 
 ### Migrations
 

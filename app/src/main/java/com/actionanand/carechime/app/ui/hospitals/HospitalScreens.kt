@@ -199,7 +199,7 @@ fun HospitalEditScreen(
         onSave = viewModel::save,
         onDelete = if (viewModel.isEditing) viewModel::delete else null,
         deleteTitle = "Delete this hospital record?",
-        deleteMessage = "History entries and medicines linked to it are kept and still show the hospital name recorded with them; only the link is removed.",
+        deleteMessage = "History entries and medicines linked to it are kept and still show the hospital name and place recorded with them. The patient ID is not kept; note it first if you may need it.",
     ) {
         TextInput(
             value = input.hospitalName,

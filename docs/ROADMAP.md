@@ -16,7 +16,7 @@
 - [x] Multiple hospitals per profile; hospital IDs, doctor, map links
 - [x] Conditions, allergies, medicine allergies and medical history
 - [x] Generic medicine library, profile medicines
-- [ ] Commit `app/schemas` 1.json (CI artifact from run on `78d13f7`) and 2.json (artifact from the v2 commit); CI fails until both are committed
+- [x] Commit `app/schemas` 1.json and 2.json from the CI `room-schemas` artifacts
 
 ## Phase 2 — Reminder reliability
 - [x] Pure recurrence and interval engine with tests (domain only)
